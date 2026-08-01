@@ -1,0 +1,18 @@
+[project]
+name = "pkport"
+version = "0.1.0"
+description = "Discover and kill dev server ports"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "click>=8.4.2",
+    "psutil>=7.2.2",
+    "questionary>=2.1.1",
+]
+
+[project.scripts]
+pkport = "pkport:main"
+
+[build-system]
+requires = ["uv_build>=0.11.28,<0.12.0"]
+build-backend = "uv_build"
