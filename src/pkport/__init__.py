@@ -1,2 +1,1 @@
-def main() -> None:
-    print("Hello from pkport!")
+"""Discover and kill dev server ports."""
