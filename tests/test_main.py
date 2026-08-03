@@ -48,11 +48,11 @@ def test_collect_listening_ports_normal(monkeypatch):
 
     rows = collect_listening_ports()
 
-    assert [r.port for r in rows] == [3000, 8080]
-    assert rows[0].pids == {456}
-    assert rows[0].names == {"proc-456"}
-    assert rows[1].pids == {123}
-    assert rows[1].names == {"proc-123"}
+    assert [r.port for r in rows] == [3000, 8080]  # noqa: S101
+    assert rows[0].pids == {456}  # noqa: S101
+    assert rows[0].names == {"proc-456"}  # noqa: S101
+    assert rows[1].pids == {123}  # noqa: S101
+    assert rows[1].names == {"proc-123"}  # noqa: S101
 
 
 def test_collect_listening_ports_skips_none_pid(monkeypatch):
@@ -62,10 +62,10 @@ def test_collect_listening_ports_skips_none_pid(monkeypatch):
 
     rows = collect_listening_ports()
 
-    assert len(rows) == 1
-    assert rows[0].port == 8080
-    assert rows[0].pids == set()
-    assert rows[0].names == set()
+    assert len(rows) == 1  # noqa: S101
+    assert rows[0].port == 8080  # noqa: S101
+    assert rows[0].pids == set()  # noqa: S101
+    assert rows[0].names == set()  # noqa: S101
 
 
 def test_collect_listening_ports_handles_access_denied(monkeypatch):
@@ -78,9 +78,9 @@ def test_collect_listening_ports_handles_access_denied(monkeypatch):
 
     rows = collect_listening_ports()
 
-    assert len(rows) == 1
-    assert rows[0].pids == {123}
-    assert rows[0].names == set()
+    assert len(rows) == 1  # noqa: S101
+    assert rows[0].pids == {123}  # noqa: S101
+    assert rows[0].names == set()  # noqa: S101
 
 
 def test_collect_listening_ports_handles_no_such_process(monkeypatch):
@@ -93,9 +93,9 @@ def test_collect_listening_ports_handles_no_such_process(monkeypatch):
 
     rows = collect_listening_ports()
 
-    assert len(rows) == 1
-    assert rows[0].pids == {123}
-    assert rows[0].names == set()
+    assert len(rows) == 1  # noqa: S101
+    assert rows[0].pids == {123}  # noqa: S101
+    assert rows[0].names == set()  # noqa: S101
 
 
 def test_kill_row_success(monkeypatch):
@@ -108,9 +108,9 @@ def test_kill_row_success(monkeypatch):
 
     msg = kill_row(row)
 
-    assert "Killed" in msg
-    assert "8080" in msg
-    assert "123" in msg
+    assert "Killed" in msg  # noqa: S101
+    assert "8080" in msg  # noqa: S101
+    assert "123" in msg  # noqa: S101
 
 
 def test_kill_row_access_denied(monkeypatch):
@@ -120,7 +120,7 @@ def test_kill_row_access_denied(monkeypatch):
 
     msg = kill_row(row)
 
-    assert "permission denied" in msg
+    assert "permission denied" in msg  # noqa: S101
 
 
 def test_kill_row_no_such_process(monkeypatch):
@@ -130,7 +130,7 @@ def test_kill_row_no_such_process(monkeypatch):
 
     msg = kill_row(row)
 
-    assert "already gone" in msg
+    assert "already gone" in msg  # noqa: S101
 
 
 def test_cli_bare_non_tty(monkeypatch):
@@ -140,7 +140,7 @@ def test_cli_bare_non_tty(monkeypatch):
 
     result = CliRunner().invoke(main, [])
 
-    assert result.exit_code == 0
+    assert result.exit_code == 0  # noqa: S101
 
 
 def test_cli_list_flag(monkeypatch):
@@ -152,8 +152,8 @@ def test_cli_list_flag(monkeypatch):
 
     result = CliRunner().invoke(main, ["--list"])
 
-    assert result.exit_code == 0
-    assert "PORT" in result.output
+    assert result.exit_code == 0  # noqa: S101
+    assert "PORT" in result.output  # noqa: S101
 
 
 def test_cli_kill_nonexistent_port(monkeypatch):
@@ -161,5 +161,5 @@ def test_cli_kill_nonexistent_port(monkeypatch):
 
     result = CliRunner().invoke(main, ["--kill", "9999", "-y"])
 
-    assert result.exit_code == 0
-    assert "no process is listening" in result.output
+    assert result.exit_code == 0  # noqa: S101
+    assert "no process is listening" in result.output  # noqa: S101
