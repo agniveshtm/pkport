@@ -30,29 +30,36 @@ def collect_listening_ports() -> list[PortRow]:
             row.pids.add(conn.pid)
             try:
                 row.names.add(psutil.Process(conn.pid).name())
-            except psutil.NoSuchProcess:
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
                 pass
     return [rows[port] for port in sorted(rows)]
 
 
 def kill_row(row: PortRow) -> str:
-    killed = []
+    terminated = []
     denied = 0
     for pid in row.pids:
         try:
-            psutil.Process(pid).terminate()
-            killed.append(pid)
+            proc = psutil.Process(pid)
+            proc.terminate()
+            terminated.append(proc)
         except psutil.NoSuchProcess:
             pass
         except psutil.AccessDenied:
             denied += 1
-    if killed:
+    if terminated:
         # brief grace period so the freed port disappears from the next refresh
-        psutil.wait_procs([psutil.Process(pid) for pid in killed], timeout=2)
+        gone, alive = psutil.wait_procs(terminated, timeout=2)
+        killed = [proc.pid for proc in gone]
+    else:
+        killed = []
+        alive = []
 
     names = ", ".join(sorted(row.names))
     if killed:
         suffix = f"; {denied} process(es) need elevated permissions" if denied else ""
+        if alive:
+            suffix += f"; {len(alive)} process(es) still running"
         return f"Killed PID {', '.join(map(str, killed))} ({names}) on port {row.port}{suffix}"
     if denied:
         return f"Port {row.port}: permission denied, {denied} process(es) not killed"
@@ -144,7 +151,7 @@ def list_plain() -> None:
 
 
 def run(subtitle: str) -> None:
-    if sys.stdin.isatty():
+    if sys.stdin.isatty() and sys.stdout.isatty():
         interactive_tui(subtitle)
     else:
         print_banner(subtitle)
@@ -161,7 +168,7 @@ def kill_port_flow(port: int, assume_yes: bool) -> None:
         click.echo(click.style(f"Port {port}: listening, but no process could be identified", fg="yellow"))
         return
     if not assume_yes:
-        if not sys.stdin.isatty():
+        if not (sys.stdin.isatty() and sys.stdout.isatty()):
             click.echo(click.style(f"Port {port}: confirmation needs a terminal; use -y to bypass", fg="yellow"))
             return
         if confirm_kill(row) is not True:
