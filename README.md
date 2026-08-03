@@ -130,41 +130,50 @@ tests\test_main.py ..........                                                   
 - **Python 3.12+** — the package supports Python >= 3.12.
 - One of: [uv](https://docs.astral.sh/uv/), [pipx](https://pipx.pypa.io/), or `pip` (bundled with Python).
 
-### Install via Executables (.exe)
-
-Windows users can download the pre-built standalone executable from the [Releases](https://github.com/agniveshtm/pkport/releases) page — no Python required:
-
-1. Download `pkport.exe` from the latest release.
-2. Run it from a terminal:
-
-```bat
-pkport.exe -l
-```
-
 ### Install via uv tool
 
+The cleanest way — installs globally and registers the `pkport` command:
+
 ```bash
-uv tool install pkport
+uv tool install git+https://github.com/agniveshtm/pkport.git
+pkport
 ```
 
 ### Install via pipx
 
 ```bash
-pipx install pkport
+pipx install git+https://github.com/agniveshtm/pkport.git
+pkport
 ```
 
 ### Install via pip
 
 ```bash
-pip install pkport
+pip install git+https://github.com/agniveshtm/pkport.git
+pkport
 ```
+
+### Install via Executable (.exe)
+
+Download `pkport.exe` from [Releases](https://github.com/agniveshtm/pkport/releases)
+
+Run `pkport.exe` directly — no Python installation required
 
 ### Install via Wheel
 
-Download the `.whl` file from the [Releases](https://github.com/agniveshtm/pkport/releases) page, then:
+Download `pkport-<version>-py3-none-any.whl` from [Releases](https://github.com/agniveshtm/pkport/releases)
+
+Install it:
 
 ```bash
-pip install pkport-0.1.0-py3-none-any.whl
+cd Downloads
+uv tool install pkport-<version>-py3-none-any.whl
+```
+
+Run:
+
+```bash
+pkport
 ```
 
 ### Install from Source (Development)
@@ -172,8 +181,8 @@ pip install pkport-0.1.0-py3-none-any.whl
 ```bash
 git clone https://github.com/agniveshtm/pkport.git
 cd pkport
-uv sync                    # create venv + install dev deps (pytest, pyinstaller)
-uv run pkport              # or: uv run python -m pkport.main
+uv sync
+uv run pkport
 ```
 
 ## Usage
