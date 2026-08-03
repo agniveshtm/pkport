@@ -1,4 +1,4 @@
 .PHONY: test
 
 test:
-	python -m pytest tests/
+	uv run pytest tests/
