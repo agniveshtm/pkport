@@ -57,6 +57,8 @@ jobs:
       - run: uv python install 3.12
       - run: uv sync
       - run: uv run pyinstaller pkport.spec
+      - name: Smoke test the built executable
+        run: .\dist\pkport.exe --help
       - name: Upload exe to GitHub Release
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65
         with:

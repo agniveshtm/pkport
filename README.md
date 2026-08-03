@@ -128,6 +128,7 @@ tests\test_main.py ..........                                                   
 ### Prerequisites
 
 - **Python 3.12+** — the package supports Python >= 3.12.
+- **Git** — required for the `git+https://` install commands below.
 - One of: [uv](https://docs.astral.sh/uv/), [pipx](https://pipx.pypa.io/), or `pip` (bundled with Python).
 
 ### Install via uv tool
@@ -139,6 +140,8 @@ uv tool install git+https://github.com/agniveshtm/pkport.git
 pkport
 ```
 
+> **Tip:** For reproducible installs, pin to a specific release tag, e.g. `git+https://github.com/agniveshtm/pkport.git@v0.1.0`.
+
 ### Install via pipx
 
 ```bash
@@ -146,12 +149,16 @@ pipx install git+https://github.com/agniveshtm/pkport.git
 pkport
 ```
 
+> **Tip:** For reproducible installs, pin to a specific release tag, e.g. `git+https://github.com/agniveshtm/pkport.git@v0.1.0`.
+
 ### Install via pip
 
 ```bash
 pip install git+https://github.com/agniveshtm/pkport.git
 pkport
 ```
+
+> **Tip:** For reproducible installs, pin to a specific release tag, e.g. `git+https://github.com/agniveshtm/pkport.git@v0.1.0`.
 
 ### Install via Executable (.exe)
 
@@ -163,11 +170,11 @@ Run `pkport.exe` directly — no Python installation required
 
 Download `pkport-<version>-py3-none-any.whl` from [Releases](https://github.com/agniveshtm/pkport/releases)
 
-Install it:
+Install it (replace `<version>` with the actual version from the release, e.g. `0.1.0`):
 
 ```bash
 cd Downloads
-uv tool install pkport-<version>-py3-none-any.whl
+uv tool install ./pkport-<version>-py3-none-any.whl
 ```
 
 Run:

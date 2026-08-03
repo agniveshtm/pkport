@@ -1,8 +1,10 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+import os
+
 a = Analysis(
     ['src/pkport/main.py'],
-    pathex=[],
+    pathex=[os.path.join(os.path.dirname(__file__), "src")],
     binaries=[],
     datas=[],
     hiddenimports=[],
