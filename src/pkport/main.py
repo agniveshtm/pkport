@@ -177,13 +177,23 @@ def kill_port_flow(port: int, assume_yes: bool) -> None:
     click.echo(click.style(kill_row(row), fg="green"))
 
 
+def _list_callback(ctx, param, value):
+    if not value or ctx.resilient_parsing:
+        return
+    print_banner("Listening TCP ports")
+    list_plain()
+    ctx.exit()
+
+
 @click.command(
     context_settings={"ignore_unknown_options": False},
 )
 @click.option(
     "--list", "-l",
     is_flag=True,
+    callback=_list_callback,
     expose_value=False,
+    is_eager=True,
     help="List all listening TCP ports with their owning process.",
 )
 @click.option(
@@ -195,10 +205,6 @@ def kill_port_flow(port: int, assume_yes: bool) -> None:
 @click.pass_context
 def main(ctx, kill, yes):
     """Discover and kill dev server ports"""
-    if ctx.params.get("list"):
-        print_banner("Listening TCP ports")
-        list_plain()
-        return
     if kill is not None:
         kill_port_flow(kill, yes)
         return
