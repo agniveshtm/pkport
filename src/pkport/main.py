@@ -176,6 +176,7 @@ def kill_port_flow(port: int, assume_yes: bool) -> None:
 @click.option(
     "--list", "-l",
     is_flag=True,
+    expose_value=False,
     help="List all listening TCP ports with their owning process.",
 )
 @click.option(
@@ -185,9 +186,9 @@ def kill_port_flow(port: int, assume_yes: bool) -> None:
 )
 @click.option("-y", "--yes", is_flag=True, help="Skip the confirmation prompt.")
 @click.pass_context
-def main(ctx, list, kill, yes):
+def main(ctx, kill, yes):
     """Discover and kill dev server ports"""
-    if list:
+    if ctx.params.get("list"):
         print_banner("Listening TCP ports")
         list_plain()
         return
