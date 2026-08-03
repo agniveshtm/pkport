@@ -4,7 +4,7 @@ import os
 
 a = Analysis(
     ['src/pkport/main.py'],
-    pathex=[os.path.join(os.path.dirname(__file__), "src")],
+    pathex=[os.path.join(SPECPATH, "src")],
     binaries=[],
     datas=[],
     hiddenimports=[],
