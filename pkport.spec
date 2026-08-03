@@ -2,9 +2,11 @@
 
 import os
 
+spec_dir = globals().get("SPECPATH") or os.path.dirname(__file__)
+
 a = Analysis(
     ['src/pkport/main.py'],
-    pathex=[os.path.join(os.path.dirname(__file__), "src")],
+    pathex=[os.path.join(spec_dir, "src")],
     binaries=[],
     datas=[],
     hiddenimports=[],
