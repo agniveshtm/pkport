@@ -197,21 +197,22 @@ def interactive_tui(subtitle: str) -> None:
         if picked is None:
             print_cancelled()
             return
-        if picked is CUSTOM_PORT_REQUEST:
+        if isinstance(picked, CustomPortRequest):
             port = prompt_custom_port()
             if port is None:
                 print_cancelled()
                 return
-            picked = resolve_port(rows, port)
-            if picked is None:
+            row = resolve_port(rows, port)
+            if row is None:
                 continue
-        assert isinstance(picked, PortRow)  # custom-port branch resolved or returned above
-        confirmed = confirm_kill(picked)
+        else:
+            row = picked
+        confirmed = confirm_kill(row)
         if confirmed is None:
             print_cancelled()
             return
         if confirmed:
-            click.echo(click.style(kill_row(picked), fg="green"))
+            click.echo(click.style(kill_row(row), fg="green"))
 
 
 def list_plain(show_paths: bool = False) -> None:
