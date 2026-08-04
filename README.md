@@ -16,11 +16,13 @@ Discover and kill dev server ports from an interactive terminal picker or direct
 - 🔍 **Auto-discovery** — scans all TCP listening ports and resolves the owning process names.
 - 🎛️ **Interactive TUI** — pick a port from a searchable/enhanced menu, confirm, and kill it without leaving the terminal.
 - 🗂️ **Plain-text listing** — `pkport -l` prints a clean table of ports, PIDs, and process names.
-- 🎯 **Kill by port** — `pkport -k <PORT>` terminates the process listening on a specific port.
+- 🎯 **Kill by port** — `pkport -k <PORT>` (CLI) or press `a` in the TUI to type a custom port and terminate it.
 - ✅ **Safe by default** — asks for confirmation before killing, with `-y` to bypass.
 - 🛡️ **Robust error handling** — gracefully handles `AccessDenied` (permission errors) and `NoSuchProcess` (already-gone processes).
 - 🚫 **Non-TTY friendly** — falls back to plain listing when stdin/stdout aren't a terminal (perfect for CI/scripts).
 - 🖥️ **Cross-platform** — Linux, macOS, and Windows.
+
+> **Permissions:** Some system processes guard their details (e.g. the executable path shown under `p`) and block termination. In those cases the affected rows show `?` for the path and killing may require elevated **admin / root privileges**, depending on your OS.
 
 ## Architecture
 
@@ -62,7 +64,7 @@ $ pkport
         ▼
 ┌───────────────────────┐        ┌───────────────────────────────┐
 │   Interactive picker  │───────▶│  Confirm kill (y/n)           │
-│   (↑/↓ · Enter · q)   │        │  → kills process(es) on port │
+│   (↑/↓ · Enter · p·a) │        │  → kills process(es) on port │
 └───────────────────────┘        └───────────────────────────────┘
         │
         ▼
@@ -86,11 +88,13 @@ Non-interactive paths: `pkport -l` lists ports and exits; `pkport -k <PORT> [-y]
 
 ### TUI Keybindings
 
-| Key      | Action                      |
-| -------- | --------------------------- |
-| `↑` / `↓` | Move through the port list |
-| `Enter`  | Kill the selected port      |
-| `q`      | Quit the picker             |
+| Key      | Action                                    |
+| -------- | ----------------------------------------- |
+| `↑` / `↓` | Move through the port list              |
+| `Enter`  | Kill the selected port                    |
+| `p`      | Toggle the process executable path column |
+| `a`      | Kill a custom port (prompts for the number) |
+| `q`      | Quit the picker                           |
 
 ### CLI Commands
 
