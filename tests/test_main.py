@@ -7,6 +7,7 @@ from click.testing import CliRunner
 from pkport.main import (
     PortRow,
     collect_listening_ports,
+    format_row,
     kill_row,
     main,
 )
@@ -21,9 +22,10 @@ def _conn(port, pid, status=None):
 
 
 class _FakeProcess:
-    def __init__(self, pid, name=None, terminate_raises=None):
+    def __init__(self, pid, name=None, exe=None, terminate_raises=None):
         self.pid = pid
         self._name = name
+        self._exe = exe
         self._terminate_raises = terminate_raises
 
     def name(self):
@@ -32,6 +34,13 @@ class _FakeProcess:
         if isinstance(self._name, Exception):
             raise self._name
         return self._name
+
+    def exe(self):
+        if self._exe is None:
+            return f"C:\\fake\\proc-{self.pid}.exe"
+        if isinstance(self._exe, Exception):
+            raise self._exe
+        return self._exe
 
     def terminate(self):
         if self._terminate_raises is not None:
@@ -101,6 +110,53 @@ def test_collect_listening_ports_handles_no_such_process(monkeypatch):
     _check(len(rows) == 1, "expected exactly 1 row")
     _check(rows[0].pids == {123}, "expected pids {123}")
     _check(rows[0].names == set(), "expected empty names")
+
+
+def test_collect_listening_ports_collects_paths(monkeypatch):
+    conns = [_conn(8080, 123)]
+    monkeypatch.setattr("pkport.main.psutil.net_connections", lambda kind="tcp": conns)
+    monkeypatch.setattr("pkport.main.psutil.Process", _FakeProcess)
+
+    rows = collect_listening_ports()
+
+    _check(
+        rows[0].paths == {r"C:\fake\proc-123.exe"},
+        f"expected executable path, got: {rows[0].paths!r}",
+    )
+
+
+def test_collect_listening_ports_handles_exe_access_denied(monkeypatch):
+    conns = [_conn(8080, 123)]
+    monkeypatch.setattr("pkport.main.psutil.net_connections", lambda kind="tcp": conns)
+    monkeypatch.setattr(
+        "pkport.main.psutil.Process",
+        lambda pid: _FakeProcess(pid, name=f"proc-{pid}", exe=psutil.AccessDenied(pid=123)),
+    )
+
+    rows = collect_listening_ports()
+
+    _check(rows[0].pids == {123}, "expected pids {123}")
+    _check(rows[0].names == {"proc-123"}, "expected name retained")
+    _check(rows[0].paths == set(), "expected empty paths")
+
+
+def test_format_row_hides_paths_by_default():
+    row = PortRow(port=8828, pids={29272}, names={"Code.exe"}, paths={"C:\\Code.exe"})
+
+    label = format_row(row)
+
+    _check("8828" in label and "29272" in label and "Code.exe" in label, f"unexpected label: {label!r}")
+    _check("C:\\Code.exe" not in label, f"path should be hidden, got: {label!r}")
+
+
+def test_format_row_shows_paths_when_enabled():
+    row = PortRow(port=8828, pids={29272}, names={"Code.exe"}, paths={"C:\\Code.exe"})
+
+    label = format_row(row, show_paths=True)
+
+    _check("C:\\Code.exe" in label, f"expected path in label, got: {label!r}")
+    head, _, _ = label.partition("C:\\Code.exe")
+    _check(head.endswith("  "), f"expected a gap before the path, got: {label!r}")
 
 
 def test_kill_row_success(monkeypatch):

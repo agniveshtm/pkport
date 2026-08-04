@@ -15,6 +15,7 @@ class PortRow:
     port: int
     pids: set[int] = field(default_factory=set)
     names: set[str] = field(default_factory=set)
+    paths: set[str] = field(default_factory=set)
 
 
 def collect_listening_ports() -> list[PortRow]:
@@ -29,7 +30,9 @@ def collect_listening_ports() -> list[PortRow]:
         if conn.pid is not None:
             row.pids.add(conn.pid)
             try:
-                row.names.add(psutil.Process(conn.pid).name())
+                proc = psutil.Process(conn.pid)
+                row.names.add(proc.name())
+                row.paths.add(proc.exe())
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 pass
     return [rows[port] for port in sorted(rows)]
@@ -66,21 +69,32 @@ def kill_row(row: PortRow) -> str:
     return f"Port {row.port}: process already gone"
 
 
+def format_row(row: PortRow, show_paths: bool = False) -> str:
+    pids = ", ".join(map(str, sorted(row.pids))) or "-"
+    names = ", ".join(sorted(row.names)) or "?"
+    if not show_paths:
+        return f"{row.port:<6} {pids:<8} {names}"
+    paths = ", ".join(sorted(row.paths)) or "?"
+    return f"{row.port:<6} {pids:<8} {names:<24} {paths}"
+
+
 def select_row(rows: list[PortRow]) -> PortRow | None:
-    choices = []
-    for row in rows:
-        pids = ", ".join(map(str, sorted(row.pids))) or "-"
-        names = ", ".join(sorted(row.names)) or "?"
-        label = f"{row.port:<6} {pids:<8} {names}"
-        if row.pids:
-            choices.append(questionary.Choice(title=label, value=row))
-        else:
-            choices.append(questionary.Choice(title=label, disabled="cannot resolve pid"))
-    choices.append(questionary.Separator(HINT))
+    state = {"show_paths": False}
+
+    def build_choices() -> list:
+        choices = []
+        for row in rows:
+            label = format_row(row, state["show_paths"])
+            if row.pids:
+                choices.append(questionary.Choice(title=label, value=row))
+            else:
+                choices.append(questionary.Choice(title=label, disabled="cannot resolve pid"))
+        choices.append(questionary.Separator(HINT))
+        return choices
 
     question = questionary.select(
         "Select a port to kill",
-        choices=choices,
+        choices=build_choices(),
         # non-empty so questionary doesn't render its default "(Use arrow keys)" at the top
         instruction=" ",
         style=STYLE,
@@ -88,13 +102,8 @@ def select_row(rows: list[PortRow]) -> PortRow | None:
 
     bindings = cast(KeyBindings, question.application.key_bindings)
 
-    @bindings.add("q", eager=True)
-    def cancel_selection(event):
-        event.app.exit(result=None)
-
-    @bindings.add(Keys.ControlM, eager=True)
-    def pick_row(event):
-        ic = next(
+    def inquirer_control(event):
+        return next(
             (
                 w.content
                 for w in event.app.layout.find_all_windows()
@@ -102,6 +111,25 @@ def select_row(rows: list[PortRow]) -> PortRow | None:
             ),
             None,
         )
+
+    @bindings.add("q", eager=True)
+    def cancel_selection(event):
+        event.app.exit(result=None)
+
+    @bindings.add("p", eager=True)
+    def toggle_paths(event):
+        state["show_paths"] = not state["show_paths"]
+        ic = inquirer_control(event)
+        if ic is None:
+            return
+        for choice, row in zip(ic.choices, rows):
+            if isinstance(choice, questionary.Choice):
+                choice.title = format_row(row, state["show_paths"])
+        event.app.invalidate()
+
+    @bindings.add(Keys.ControlM, eager=True)
+    def pick_row(event):
+        ic = inquirer_control(event)
         # exit without marking the question answered, so the picked
         # row's text is not appended to the "? Select a port to kill" line
         event.app.exit(result=ic.get_pointed_at().value if ic else None)
