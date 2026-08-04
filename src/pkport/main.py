@@ -1,4 +1,5 @@
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import cast
 import click
@@ -26,9 +27,11 @@ CUSTOM_PORT_REQUEST = CustomPortRequest()
 
 
 def validate_port(text: str) -> bool | str:
-    if not text.isdigit():
+    try:
+        port = int(text)
+    except ValueError:
         return "Port must be a number"
-    if not 1 <= int(text) <= 65535:
+    if not 1 <= port <= 65535:
         return "Port must be between 1 and 65535"
     return True
 
@@ -42,7 +45,7 @@ def prompt_custom_port() -> int | None:
     return int(value) if value is not None else None
 
 
-def collect_listening_ports() -> list[PortRow]:
+def collect_listening_ports(collect_paths: bool = False) -> list[PortRow]:
     rows: dict[int, PortRow] = {}
     for conn in psutil.net_connections(kind="tcp"):
         if conn.status != psutil.CONN_LISTEN:
@@ -56,7 +59,8 @@ def collect_listening_ports() -> list[PortRow]:
             try:
                 proc = psutil.Process(conn.pid)
                 row.names.add(proc.name())
-                row.paths.add(proc.exe())
+                if collect_paths:
+                    row.paths.add(proc.exe())
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 pass
     return [rows[port] for port in sorted(rows)]
@@ -102,7 +106,10 @@ def format_row(row: PortRow, show_paths: bool = False) -> str:
     return f"{row.port:<6} {pids:<8} {names:<24} {paths}"
 
 
-def select_row(rows: list[PortRow]) -> PortRow | CustomPortRequest | None:
+def select_row(
+    rows: list[PortRow],
+    refresh_rows: Callable[[], list[PortRow]] | None = None,
+) -> PortRow | CustomPortRequest | None:
     state = {"show_paths": False}
 
     def build_choices() -> list:
@@ -150,7 +157,9 @@ def select_row(rows: list[PortRow]) -> PortRow | CustomPortRequest | None:
         ic = inquirer_control(event)
         if ic is None:
             return
-        for choice, row in zip(ic.choices, rows):
+        # scan with paths only when the column is about to be shown
+        current = refresh_rows() if state["show_paths"] and refresh_rows is not None else rows
+        for choice, row in zip(ic.choices, current):
             if isinstance(choice, questionary.Choice):
                 choice.title = format_row(row, state["show_paths"])
         event.app.invalidate()
@@ -193,11 +202,14 @@ def interactive_tui(subtitle: str) -> None:
         if not rows:
             click.echo(click.style("No TCP ports are being listened on.", fg="yellow"))
             return
-        picked = select_row(rows)
+        picked = select_row(rows, refresh_rows=lambda: collect_listening_ports(collect_paths=True))
         if picked is None:
             print_cancelled()
             return
         if isinstance(picked, CustomPortRequest):
+            # Clear and re-show banner so the "Select a port to kill" prompt doesn't persist
+            click.clear()
+            print_banner(subtitle)
             port = prompt_custom_port()
             if port is None:
                 print_cancelled()
@@ -216,7 +228,7 @@ def interactive_tui(subtitle: str) -> None:
 
 
 def list_plain(show_paths: bool = False) -> None:
-    rows = collect_listening_ports()
+    rows = collect_listening_ports(collect_paths=show_paths)
     if not rows:
         click.echo(click.style("No TCP ports are being listened on.", fg="yellow"))
         return

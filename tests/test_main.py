@@ -115,12 +115,23 @@ def test_collect_listening_ports_handles_no_such_process(monkeypatch):
     _check(rows[0].names == set(), "expected empty names")
 
 
-def test_collect_listening_ports_collects_paths(monkeypatch):
+def test_collect_listening_ports_skips_exe_by_default(monkeypatch):
     conns = [_conn(8080, 123)]
     monkeypatch.setattr("pkport.main.psutil.net_connections", lambda kind="tcp": conns)
     monkeypatch.setattr("pkport.main.psutil.Process", _FakeProcess)
 
     rows = collect_listening_ports()
+
+    _check(rows[0].names == {"proc-123"}, "expected process name collected")
+    _check(rows[0].paths == set(), "expected no paths when not requested")
+
+
+def test_collect_listening_ports_collects_paths(monkeypatch):
+    conns = [_conn(8080, 123)]
+    monkeypatch.setattr("pkport.main.psutil.net_connections", lambda kind="tcp": conns)
+    monkeypatch.setattr("pkport.main.psutil.Process", _FakeProcess)
+
+    rows = collect_listening_ports(collect_paths=True)
 
     _check(
         rows[0].paths == {r"C:\fake\proc-123.exe"},
@@ -136,7 +147,7 @@ def test_collect_listening_ports_handles_exe_access_denied(monkeypatch):
         lambda pid: _FakeProcess(pid, name=f"proc-{pid}", exe=psutil.AccessDenied(pid=123)),
     )
 
-    rows = collect_listening_ports()
+    rows = collect_listening_ports(collect_paths=True)
 
     _check(rows[0].pids == {123}, "expected pids {123}")
     _check(rows[0].names == {"proc-123"}, "expected name retained")
@@ -170,6 +181,11 @@ def test_validate_port():
     _check(isinstance(validate_port("0"), str), "expected port 0 to fail")
     _check(isinstance(validate_port("65536"), str), "expected port 65536 to fail")
     _check(isinstance(validate_port(""), str), "expected empty input to fail")
+
+
+def test_validate_port_unicode_digit_does_not_crash():
+    # "²".isdigit() is True but int("²") raises ValueError
+    _check(isinstance(validate_port("\u00b2"), str), "expected superscript digit to fail gracefully")
 
 
 def _record_echo(monkeypatch):
@@ -211,7 +227,7 @@ def test_list_plain_with_paths(monkeypatch):
         PortRow(port=3000, pids={456}, names={"node"}, paths={r"C:\node.exe"}),
         PortRow(port=8080, pids={123}, names={"python"}, paths={r"C:\python.exe"}),
     ]
-    monkeypatch.setattr("pkport.main.collect_listening_ports", lambda: rows)
+    monkeypatch.setattr("pkport.main.collect_listening_ports", lambda collect_paths=False: rows)
     lines = []
     monkeypatch.setattr("pkport.main.click.echo", lambda msg, **kwargs: lines.append(msg))
 
@@ -262,7 +278,7 @@ def test_kill_row_no_such_process(monkeypatch):
 def test_cli_bare_non_tty(monkeypatch):
     monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
     monkeypatch.setattr(sys.stdout, "isatty", lambda: False)
-    monkeypatch.setattr("pkport.main.collect_listening_ports", lambda: [])
+    monkeypatch.setattr("pkport.main.collect_listening_ports", lambda collect_paths=False: [])
 
     result = CliRunner().invoke(main, [])
 
@@ -275,7 +291,7 @@ def test_cli_list_flag(monkeypatch):
         PortRow(port=3000, pids={456}, names={"node"}),
         PortRow(port=8080, pids={123}, names={"python"}),
     ]
-    monkeypatch.setattr("pkport.main.collect_listening_ports", lambda: rows)
+    monkeypatch.setattr("pkport.main.collect_listening_ports", lambda collect_paths=False: rows)
 
     result = CliRunner().invoke(main, ["--list"])
 
