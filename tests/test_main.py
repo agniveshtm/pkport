@@ -9,7 +9,10 @@ from pkport.main import (
     collect_listening_ports,
     format_row,
     kill_row,
+    list_plain,
     main,
+    resolve_port,
+    validate_port,
 )
 
 
@@ -157,6 +160,68 @@ def test_format_row_shows_paths_when_enabled():
     _check("C:\\Code.exe" in label, f"expected path in label, got: {label!r}")
     head, _, _ = label.partition("C:\\Code.exe")
     _check(head.endswith("  "), f"expected a gap before the path, got: {label!r}")
+
+
+def test_validate_port():
+    _check(validate_port("8080") is True, "expected a valid port to pass")
+    _check(validate_port("1") is True, "expected port 1 to pass")
+    _check(validate_port("65535") is True, "expected port 65535 to pass")
+    _check(isinstance(validate_port("abc"), str), "expected non-numeric to fail")
+    _check(isinstance(validate_port("0"), str), "expected port 0 to fail")
+    _check(isinstance(validate_port("65536"), str), "expected port 65536 to fail")
+    _check(isinstance(validate_port(""), str), "expected empty input to fail")
+
+
+def _record_echo(monkeypatch):
+    messages = []
+    monkeypatch.setattr("pkport.main.click.echo", lambda msg, **kwargs: messages.append(msg))
+    return messages
+
+
+def test_resolve_port_found():
+    rows = [PortRow(port=8080, pids={123}, names={"python"})]
+
+    row = resolve_port(rows, 8080)
+
+    _check(row is rows[0], f"expected the matching row, got: {row!r}")
+
+
+def test_resolve_port_not_listening(monkeypatch):
+    rows = [PortRow(port=8080, pids={123}, names={"python"})]
+    messages = _record_echo(monkeypatch)
+
+    row = resolve_port(rows, 9999)
+
+    _check(row is None, f"expected None, got: {row!r}")
+    _check(any("no process is listening" in m for m in messages), f"expected a warning, got: {messages!r}")
+
+
+def test_resolve_port_no_pid(monkeypatch):
+    rows = [PortRow(port=8080)]
+    messages = _record_echo(monkeypatch)
+
+    row = resolve_port(rows, 8080)
+
+    _check(row is None, f"expected None, got: {row!r}")
+    _check(any("no process could be identified" in m for m in messages), f"expected a warning, got: {messages!r}")
+
+
+def test_list_plain_with_paths(monkeypatch):
+    rows = [
+        PortRow(port=3000, pids={456}, names={"node"}, paths={r"C:\node.exe"}),
+        PortRow(port=8080, pids={123}, names={"python"}, paths={r"C:\python.exe"}),
+    ]
+    monkeypatch.setattr("pkport.main.collect_listening_ports", lambda: rows)
+    lines = []
+    monkeypatch.setattr("pkport.main.click.echo", lambda msg, **kwargs: lines.append(msg))
+
+    list_plain(show_paths=True)
+
+    _check(any("PATH" in m for m in lines), f"expected a PATH header, got: {lines!r}")
+    _check(
+        any(r"C:\node.exe" in m for m in lines) and any(r"C:\python.exe" in m for m in lines),
+        f"expected paths in output, got: {lines!r}",
+    )
 
 
 def test_kill_row_success(monkeypatch):

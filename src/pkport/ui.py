@@ -1,7 +1,7 @@
 import click
 import questionary
 
-HINT = "↑/↓: move | Enter: kill selected | p: path | q: quit"
+HINT = "↑/↓: move | Enter: kill selected | a: enter custom port | p: path | q: quit"
 
 LOGO = """██████╗ ██╗  ██╗██████╗  ██████╗ ██████╗ ████████╗
 ██╔══██╗██║ ██╔╝██╔══██╗██╔═══██╗██╔══██╗╚══██╔══╝
