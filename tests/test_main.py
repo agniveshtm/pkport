@@ -331,7 +331,6 @@ def test_select_row_toggle_paths_refresh_by_port():
     ]
 
     # Simulate the choices list as select_row builds it
-    import questionary
 
     class MockChoice:
         def __init__(self, title, value):
@@ -346,7 +345,6 @@ def test_select_row_toggle_paths_refresh_by_port():
     ] + [MockSeparator()]
 
     # The fixed logic from select_row.toggle_paths
-    show_paths = True
     current = refreshed_rows
     refreshed_by_port = {r.port: r for r in current}
 
@@ -366,9 +364,12 @@ def test_select_row_toggle_paths_refresh_by_port():
     choice_8080 = choices[1]  # port 8080
     choice_sep = choices[2]   # separator
 
-    _check(isinstance(choice_sep, MockSeparator), "separator preserved")
-    assert isinstance(choice_3000, MockChoice)
-    assert isinstance(choice_8080, MockChoice)
+    if not isinstance(choice_sep, MockSeparator):
+        raise TypeError("expected MockSeparator")
+    if not isinstance(choice_3000, MockChoice):
+        raise TypeError("expected MockChoice")
+    if not isinstance(choice_8080, MockChoice):
+        raise TypeError("expected MockChoice")
 
     # 3000 was removed in refresh -> value should be unchanged (stale but not crashed)
     _check(choice_3000.value.port == 3000, "removed port retains old row reference")
