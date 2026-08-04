@@ -27,10 +27,9 @@ CUSTOM_PORT_REQUEST = CustomPortRequest()
 
 
 def validate_port(text: str) -> bool | str:
-    try:
-        port = int(text)
-    except ValueError:
+    if not text.isascii() or not text.isdigit():
         return "Port must be a number"
+    port = int(text)
     if not 1 <= port <= 65535:
         return "Port must be between 1 and 65535"
     return True

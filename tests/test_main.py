@@ -186,6 +186,8 @@ def test_validate_port():
 def test_validate_port_unicode_digit_does_not_crash():
     # "²".isdigit() is True but int("²") raises ValueError
     _check(isinstance(validate_port("\u00b2"), str), "expected superscript digit to fail gracefully")
+    # int() parses full-width digits, but only ASCII base-10 digits are accepted
+    _check(isinstance(validate_port("\uff11\uff12"), str), "expected full-width digits to fail")
 
 
 def _record_echo(monkeypatch):
