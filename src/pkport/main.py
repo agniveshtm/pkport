@@ -158,9 +158,18 @@ def select_row(
             return
         # scan with paths only when the column is about to be shown
         current = refresh_rows() if state["show_paths"] and refresh_rows is not None else rows
-        for choice, row in zip(ic.choices, current):
-            if isinstance(choice, questionary.Choice):
-                choice.title = format_row(row, state["show_paths"])
+        # map refreshed rows by port for stable lookup
+        refreshed_by_port = {r.port: r for r in current}
+        for choice in ic.choices:
+            if not isinstance(choice, questionary.Choice):
+                continue  # skip separator
+            old_row = choice.value
+            if not isinstance(old_row, PortRow):
+                continue
+            new_row = refreshed_by_port.get(old_row.port)
+            if new_row is not None:
+                choice.title = format_row(new_row, state["show_paths"])
+                choice.value = new_row
         event.app.invalidate()
 
     @bindings.add(Keys.ControlM, eager=True)

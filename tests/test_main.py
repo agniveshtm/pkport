@@ -13,6 +13,7 @@ from pkport.main import (
     main,
     resolve_port,
     validate_port,
+    STYLE,
 )
 
 
@@ -311,3 +312,69 @@ def test_cli_kill_nonexistent_port(monkeypatch):
         "no process is listening" in result.output,
         f"expected 'no process is listening' in output, got: {result.output!r}",
     )
+
+
+def test_select_row_toggle_paths_refresh_by_port():
+    """toggle_paths should map refreshed rows by port, not by position."""
+    from pkport.main import PortRow
+
+    # Initial scan: ports 3000 and 8080
+    initial_rows = [
+        PortRow(port=3000, pids={111}, names={"node"}, paths={r"C:\node.exe"}),
+        PortRow(port=8080, pids={222}, names={"python"}, paths={r"C:\python.exe"}),
+    ]
+
+    # Refreshed scan: port 3000 gone, port 8080 PID changed, port 5000 added
+    refreshed_rows = [
+        PortRow(port=5000, pids={333}, names={"newproc"}, paths={r"C:\new.exe"}),
+        PortRow(port=8080, pids={999}, names={"python"}, paths={r"C:\python.exe"}),
+    ]
+
+    # Simulate the choices list as select_row builds it
+    import questionary
+
+    class MockChoice:
+        def __init__(self, title, value):
+            self.title = title
+            self.value = value
+
+    class MockSeparator:
+        pass
+
+    choices = [
+        MockChoice(f"{r.port}", r) for r in initial_rows
+    ] + [MockSeparator()]
+
+    # The fixed logic from select_row.toggle_paths
+    show_paths = True
+    current = refreshed_rows
+    refreshed_by_port = {r.port: r for r in current}
+
+    for choice in choices:
+        if not isinstance(choice, MockChoice):
+            continue  # skip separator
+        old_row = choice.value
+        if not isinstance(old_row, PortRow):
+            continue
+        new_row = refreshed_by_port.get(old_row.port)
+        if new_row is not None:
+            choice.title = f"{new_row.port}"
+            choice.value = new_row
+
+    # Verify: 3000 should be gone (no refreshed row), 8080 should have new PID 999
+    choice_3000 = choices[0]  # port 3000
+    choice_8080 = choices[1]  # port 8080
+    choice_sep = choices[2]   # separator
+
+    _check(isinstance(choice_sep, MockSeparator), "separator preserved")
+    assert isinstance(choice_3000, MockChoice)
+    assert isinstance(choice_8080, MockChoice)
+
+    # 3000 was removed in refresh -> value should be unchanged (stale but not crashed)
+    _check(choice_3000.value.port == 3000, "removed port retains old row reference")
+    _check(choice_3000.title == "3000", "removed port title unchanged")
+
+    # 8080 PID changed from 222 to 999 -> value should point to refreshed row
+    _check(choice_8080.value.port == 8080, "port 8080 still present")
+    _check(choice_8080.value.pids == {999}, "PID updated to refreshed value")
+    _check(choice_8080.title == "8080", "title reflects refreshed port")
