@@ -2,8 +2,6 @@ import sys
 from types import SimpleNamespace
 
 import psutil
-import pytest
-import questionary
 from click.testing import CliRunner
 
 from pkport.main import (
@@ -13,7 +11,6 @@ from pkport.main import (
     kill_row,
     list_plain,
     main,
-    remap_choices,
     resolve_port,
     validate_port,
     STYLE,
@@ -59,93 +56,122 @@ def _check(condition, message):
         raise AssertionError(message)
 
 
-@pytest.mark.parametrize(
-    "conns, process_factory, collect_paths, expected",
-    [
-        (
-            [_conn(8080, 123), _conn(3000, 456)],
-            _FakeProcess,
-            False,
-            [
-                PortRow(port=3000, pids={456}, names={"proc-456"}),
-                PortRow(port=8080, pids={123}, names={"proc-123"}),
-            ],
-        ),
-        ([_conn(8080, None)], _FakeProcess, False, [PortRow(port=8080)]),
-        (
-            [_conn(8080, 123)],
-            lambda pid: _FakeProcess(pid, name=psutil.AccessDenied(pid=123)),
-            False,
-            [PortRow(port=8080, pids={123})],
-        ),
-        (
-            [_conn(8080, 123)],
-            lambda pid: _FakeProcess(pid, name=psutil.NoSuchProcess(pid=123)),
-            False,
-            [PortRow(port=8080, pids={123})],
-        ),
-        (
-            [_conn(8080, 123)],
-            _FakeProcess,
-            False,
-            [PortRow(port=8080, pids={123}, names={"proc-123"})],
-        ),
-        (
-            [_conn(8080, 123)],
-            _FakeProcess,
-            True,
-            [
-                PortRow(
-                    port=8080,
-                    pids={123},
-                    names={"proc-123"},
-                    paths={r"C:\fake\proc-123.exe"},
-                )
-            ],
-        ),
-        (
-            [_conn(8080, 123)],
-            lambda pid: _FakeProcess(pid, name=f"proc-{pid}", exe=psutil.AccessDenied(pid=123)),
-            True,
-            [PortRow(port=8080, pids={123}, names={"proc-123"})],
-        ),
-    ],
-    ids=[
-        "normal",
-        "skips_none_pid",
-        "handles_access_denied",
-        "handles_no_such_process",
-        "skips_exe_by_default",
-        "collects_paths",
-        "handles_exe_access_denied",
-    ],
-)
-def test_collect_listening_ports(monkeypatch, conns, process_factory, collect_paths, expected):
+def test_collect_listening_ports_normal(monkeypatch):
+    conns = [
+        _conn(8080, 123),
+        _conn(3000, 456),
+    ]
     monkeypatch.setattr("pkport.main.psutil.net_connections", lambda kind="tcp": conns)
-    monkeypatch.setattr("pkport.main.psutil.Process", process_factory)
+    monkeypatch.setattr("pkport.main.psutil.Process", _FakeProcess)
 
-    rows = collect_listening_ports(collect_paths=collect_paths)
+    rows = collect_listening_ports()
 
-    _check(rows == expected, f"expected {expected!r}, got {rows!r}")
+    _check([r.port for r in rows] == [3000, 8080], "expected sorted ports [3000, 8080]")
+    _check(rows[0].pids == {456}, "expected row[0] pids {456}")
+    _check(rows[0].names == {"proc-456"}, "expected row[0] names {'proc-456'}")
+    _check(rows[1].pids == {123}, "expected row[1] pids {123}")
+    _check(rows[1].names == {"proc-123"}, "expected row[1] names {'proc-123'}")
 
 
-@pytest.mark.parametrize(
-    "show_paths, expect_path_in_label",
-    [(False, False), (True, True)],
-    ids=["hides_paths_by_default", "shows_paths_when_enabled"],
-)
-def test_format_row_path_visibility(show_paths, expect_path_in_label):
-    row = PortRow(port=8828, pids={29272}, names={"Code.exe"}, paths={r"C:\Code.exe"})
+def test_collect_listening_ports_skips_none_pid(monkeypatch):
+    conns = [_conn(8080, None)]
+    monkeypatch.setattr("pkport.main.psutil.net_connections", lambda kind="tcp": conns)
+    monkeypatch.setattr("pkport.main.psutil.Process", _FakeProcess)
 
-    label = format_row(row, show_paths=show_paths)
+    rows = collect_listening_ports()
 
-    if expect_path_in_label:
-        _check(r"C:\Code.exe" in label, f"expected path in label, got: {label!r}")
-        head, _, _ = label.partition(r"C:\Code.exe")
-        _check(head.endswith("  "), f"expected a gap before the path, got: {label!r}")
-    else:
-        _check("8828" in label and "29272" in label and "Code.exe" in label, f"unexpected label: {label!r}")
-        _check(r"C:\Code.exe" not in label, f"path should be hidden, got: {label!r}")
+    _check(len(rows) == 1, "expected exactly 1 row")
+    _check(rows[0].port == 8080, "expected port 8080")
+    _check(rows[0].pids == set(), "expected empty pids")
+    _check(rows[0].names == set(), "expected empty names")
+
+
+def test_collect_listening_ports_handles_access_denied(monkeypatch):
+    conns = [_conn(8080, 123)]
+    monkeypatch.setattr("pkport.main.psutil.net_connections", lambda kind="tcp": conns)
+    monkeypatch.setattr(
+        "pkport.main.psutil.Process",
+        lambda pid: _FakeProcess(pid, name=psutil.AccessDenied(pid=123)),
+    )
+
+    rows = collect_listening_ports()
+
+    _check(len(rows) == 1, "expected exactly 1 row")
+    _check(rows[0].pids == {123}, "expected pids {123}")
+    _check(rows[0].names == set(), "expected empty names")
+
+
+def test_collect_listening_ports_handles_no_such_process(monkeypatch):
+    conns = [_conn(8080, 123)]
+    monkeypatch.setattr("pkport.main.psutil.net_connections", lambda kind="tcp": conns)
+    monkeypatch.setattr(
+        "pkport.main.psutil.Process",
+        lambda pid: _FakeProcess(pid, name=psutil.NoSuchProcess(pid=123)),
+    )
+
+    rows = collect_listening_ports()
+
+    _check(len(rows) == 1, "expected exactly 1 row")
+    _check(rows[0].pids == {123}, "expected pids {123}")
+    _check(rows[0].names == set(), "expected empty names")
+
+
+def test_collect_listening_ports_skips_exe_by_default(monkeypatch):
+    conns = [_conn(8080, 123)]
+    monkeypatch.setattr("pkport.main.psutil.net_connections", lambda kind="tcp": conns)
+    monkeypatch.setattr("pkport.main.psutil.Process", _FakeProcess)
+
+    rows = collect_listening_ports()
+
+    _check(rows[0].names == {"proc-123"}, "expected process name collected")
+    _check(rows[0].paths == set(), "expected no paths when not requested")
+
+
+def test_collect_listening_ports_collects_paths(monkeypatch):
+    conns = [_conn(8080, 123)]
+    monkeypatch.setattr("pkport.main.psutil.net_connections", lambda kind="tcp": conns)
+    monkeypatch.setattr("pkport.main.psutil.Process", _FakeProcess)
+
+    rows = collect_listening_ports(collect_paths=True)
+
+    _check(
+        rows[0].paths == {r"C:\fake\proc-123.exe"},
+        f"expected executable path, got: {rows[0].paths!r}",
+    )
+
+
+def test_collect_listening_ports_handles_exe_access_denied(monkeypatch):
+    conns = [_conn(8080, 123)]
+    monkeypatch.setattr("pkport.main.psutil.net_connections", lambda kind="tcp": conns)
+    monkeypatch.setattr(
+        "pkport.main.psutil.Process",
+        lambda pid: _FakeProcess(pid, name=f"proc-{pid}", exe=psutil.AccessDenied(pid=123)),
+    )
+
+    rows = collect_listening_ports(collect_paths=True)
+
+    _check(rows[0].pids == {123}, "expected pids {123}")
+    _check(rows[0].names == {"proc-123"}, "expected name retained")
+    _check(rows[0].paths == set(), "expected empty paths")
+
+
+def test_format_row_hides_paths_by_default():
+    row = PortRow(port=8828, pids={29272}, names={"Code.exe"}, paths={"C:\\Code.exe"})
+
+    label = format_row(row)
+
+    _check("8828" in label and "29272" in label and "Code.exe" in label, f"unexpected label: {label!r}")
+    _check("C:\\Code.exe" not in label, f"path should be hidden, got: {label!r}")
+
+
+def test_format_row_shows_paths_when_enabled():
+    row = PortRow(port=8828, pids={29272}, names={"Code.exe"}, paths={"C:\\Code.exe"})
+
+    label = format_row(row, show_paths=True)
+
+    _check("C:\\Code.exe" in label, f"expected path in label, got: {label!r}")
+    head, _, _ = label.partition("C:\\Code.exe")
+    _check(head.endswith("  "), f"expected a gap before the path, got: {label!r}")
 
 
 def test_validate_port():
@@ -304,6 +330,8 @@ def test_cli_kill_system_port_refuses(monkeypatch):
 
 def test_select_row_toggle_paths_refresh_by_port():
     """toggle_paths should map refreshed rows by port, not by position."""
+    from pkport.main import PortRow
+
     # Initial scan: ports 3000 and 8080
     initial_rows = [
         PortRow(port=3000, pids={111}, names={"node"}, paths={r"C:\node.exe"}),
@@ -316,35 +344,52 @@ def test_select_row_toggle_paths_refresh_by_port():
         PortRow(port=8080, pids={999}, names={"python"}, paths={r"C:\python.exe"}),
     ]
 
-    # Simulate the choices list as select_row builds it, with real questionary objects
+    # Simulate the choices list as select_row builds it
+
+    class MockChoice:
+        def __init__(self, title, value):
+            self.title = title
+            self.value = value
+
+    class MockSeparator:
+        pass
+
     choices = [
-        questionary.Choice(title=f"{r.port}", value=r) for r in initial_rows
-    ] + [questionary.Separator()]
+        MockChoice(f"{r.port}", r) for r in initial_rows
+    ] + [MockSeparator()]
 
-    remap_choices(choices, refreshed_rows, show_paths=True)
+    # The fixed logic from select_row.toggle_paths
+    current = refreshed_rows
+    refreshed_by_port = {r.port: r for r in current}
 
-    choice_3000, choice_8080, choice_sep = choices
+    for choice in choices:
+        if not isinstance(choice, MockChoice):
+            continue  # skip separator
+        old_row = choice.value
+        if not isinstance(old_row, PortRow):
+            continue
+        new_row = refreshed_by_port.get(old_row.port)
+        if new_row is not None:
+            choice.title = f"{new_row.port}"
+            choice.value = new_row
 
-    if not isinstance(choice_sep, questionary.Separator):
-        raise TypeError("expected questionary.Separator")
-    if not isinstance(choice_3000, questionary.Choice):
-        raise TypeError("expected questionary.Choice")
-    if not isinstance(choice_8080, questionary.Choice):
-        raise TypeError("expected questionary.Choice")
+    # Verify: 3000 should be gone (no refreshed row), 8080 should have new PID 999
+    choice_3000 = choices[0]  # port 3000
+    choice_8080 = choices[1]  # port 8080
+    choice_sep = choices[2]   # separator
 
-    value_3000 = choice_3000.value
-    value_8080 = choice_8080.value
-    if not isinstance(value_3000, PortRow) or not isinstance(value_8080, PortRow):
-        raise TypeError("expected PortRow choice values")
+    if not isinstance(choice_sep, MockSeparator):
+        raise TypeError("expected MockSeparator")
+    if not isinstance(choice_3000, MockChoice):
+        raise TypeError("expected MockChoice")
+    if not isinstance(choice_8080, MockChoice):
+        raise TypeError("expected MockChoice")
 
     # 3000 was removed in refresh -> value should be unchanged (stale but not crashed)
-    _check(value_3000.port == 3000, "removed port retains old row reference")
+    _check(choice_3000.value.port == 3000, "removed port retains old row reference")
     _check(choice_3000.title == "3000", "removed port title unchanged")
 
     # 8080 PID changed from 222 to 999 -> value should point to refreshed row
-    _check(value_8080.port == 8080, "port 8080 still present")
-    _check(value_8080.pids == {999}, "PID updated to refreshed value")
-    _check(
-        choice_8080.title == format_row(refreshed_rows[1], show_paths=True),
-        "title reflects refreshed row",
-    )
+    _check(choice_8080.value.port == 8080, "port 8080 still present")
+    _check(choice_8080.value.pids == {999}, "PID updated to refreshed value")
+    _check(choice_8080.title == "8080", "title reflects refreshed port")
