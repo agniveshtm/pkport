@@ -195,7 +195,7 @@ def resolve_port(rows: list[PortRow], port: int) -> PortRow | None:
     """Look up `port` in `rows`; print a warning and return None if it can't be killed."""
     row = next((r for r in rows if r.port == port), None)
     if row is None:
-        click.echo(click.style(f"Port {port}: no process is listening on it", fg="yellow"))
+        click.echo(click.style(f"Port {port}: no TCP process is listening on it", fg="yellow"))
         return None
     if not row.pids:
         click.echo(click.style(f"Port {port}: listening, but no process could be identified", fg="yellow"))
@@ -294,7 +294,7 @@ def _list_callback(ctx, param, value):
 @click.option(
     "--kill", "-k",
     type=click.IntRange(1, 65535),
-    help="Kill the process listening on PORT.",
+    help="Kill the TCP process listening on PORT.",
 )
 @click.option("-y", "--yes", is_flag=True, help="Skip the confirmation prompt.")
 @click.pass_context
