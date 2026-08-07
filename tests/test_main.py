@@ -8,6 +8,7 @@ from pkport.main import (
     PortRow,
     collect_listening_ports,
     format_row,
+    is_system_process,
     kill_row,
     list_plain,
     main,
@@ -49,6 +50,18 @@ class _FakeProcess:
     def terminate(self):
         if self._terminate_raises is not None:
             raise self._terminate_raises
+
+
+class _TrackingProcess(_FakeProcess):
+    """Records terminate() calls; used to assert the protection check fires first."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.terminated = 0
+
+    def terminate(self):
+        self.terminated += 1
+        super().terminate()
 
 
 def _check(condition, message):
@@ -174,6 +187,21 @@ def test_format_row_shows_paths_when_enabled():
     _check(head.endswith("  "), f"expected a gap before the path, got: {label!r}")
 
 
+def test_is_system_process_low_pid_is_system_on_windows(monkeypatch):
+    monkeypatch.setattr(sys, "platform", "win32")
+    row = PortRow(port=8080, pids={4}, names={"myapp"})
+
+    _check(is_system_process(row), "expected PID 4 to be system-level on Windows")
+
+
+def test_is_system_process_low_pid_not_system_on_non_windows(monkeypatch):
+    # low PIDs (even 1) are not system-owned outside Windows, e.g. a container's PID 1
+    monkeypatch.setattr(sys, "platform", "linux")
+    row = PortRow(port=8080, pids={1}, names={"myapp"})
+
+    _check(not is_system_process(row), "expected PID 1 to be safe on non-Windows")
+
+
 def test_validate_port():
     _check(validate_port("8080") is True, "expected a valid port to pass")
     _check(validate_port("1") is True, "expected port 1 to pass")
@@ -212,7 +240,7 @@ def test_resolve_port_not_listening(monkeypatch):
     row = resolve_port(rows, 9999)
 
     _check(row is None, f"expected None, got: {row!r}")
-    _check(any("no process is listening" in m for m in messages), f"expected a warning, got: {messages!r}")
+    _check(any("no TCP process is listening" in m for m in messages), f"expected a warning, got: {messages!r}")
 
 
 def test_resolve_port_no_pid(monkeypatch):
@@ -278,6 +306,31 @@ def test_kill_row_no_such_process(monkeypatch):
     _check("already gone" in msg, f"expected 'already gone' in message, got: {msg!r}")
 
 
+def test_kill_row_refuses_recycled_system_pid(monkeypatch):
+    # the scan said "node", but the PID was recycled by a protected process
+    # before termination -> kill_row must revalidate and refuse
+    row = PortRow(port=8080, pids={123}, names={"node"})
+    proc = _TrackingProcess(123, name="svchost.exe")
+    monkeypatch.setattr("pkport.main.psutil.Process", lambda pid: proc)
+
+    msg = kill_row(row)
+
+    _check("refused" in msg, f"expected a refusal, got: {msg!r}")
+    _check(proc.terminated == 0, f"expected no terminate call, got: {proc.terminated} calls")
+
+
+def test_kill_row_fails_closed_on_unknown_identity(monkeypatch):
+    # live identity cannot be verified (AccessDenied on name) -> fail closed
+    row = PortRow(port=8080, pids={123}, names={"node"})
+    proc = _TrackingProcess(123, name=psutil.AccessDenied(pid=123))
+    monkeypatch.setattr("pkport.main.psutil.Process", lambda pid: proc)
+
+    msg = kill_row(row)
+
+    _check("refused" in msg, f"expected a refusal, got: {msg!r}")
+    _check(proc.terminated == 0, f"expected no terminate call, got: {proc.terminated} calls")
+
+
 def test_cli_bare_non_tty(monkeypatch):
     monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
     monkeypatch.setattr(sys.stdout, "isatty", lambda: False)
@@ -309,9 +362,23 @@ def test_cli_kill_nonexistent_port(monkeypatch):
 
     _check(result.exit_code == 0, f"expected exit code 0, got: {result.exit_code}")
     _check(
-        "no process is listening" in result.output,
-        f"expected 'no process is listening' in output, got: {result.output!r}",
+        "no TCP process is listening" in result.output,
+        f"expected 'no TCP process is listening' in output, got: {result.output!r}",
     )
+
+
+def test_cli_kill_system_port_refuses(monkeypatch):
+    rows = [PortRow(port=135, pids={1684}, names={"svchost.exe"})]
+    monkeypatch.setattr("pkport.main.collect_listening_ports", lambda: rows)
+
+    result = CliRunner().invoke(main, ["--kill", "135", "-y"])
+
+    _check(result.exit_code == 0, f"expected exit code 0, got: {result.exit_code}")
+    _check(
+        "system-level process" in result.output,
+        f"expected a refusal in output, got: {result.output!r}",
+    )
+    _check("Killed" not in result.output, f"expected no kill, got: {result.output!r}")
 
 
 def test_select_row_toggle_paths_refresh_by_port():

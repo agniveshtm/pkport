@@ -36,4 +36,4 @@ def print_cancelled() -> None:
     click.clear()
     for line in LOGO.splitlines():
         click.echo(click.style(line, fg="yellow", bold=True))
-    click.echo(click.style("Cancelled by user", fg="blue"))
+    click.echo(click.style("Closed by user", fg="blue"))

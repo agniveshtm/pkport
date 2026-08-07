@@ -25,6 +25,26 @@ class CustomPortRequest:
 
 CUSTOM_PORT_REQUEST = CustomPortRequest()
 
+# Names of kernel/system-level processes; killing them can crash or destabilize the OS.
+SYSTEM_PROCESS_NAMES = {
+    # Windows kernel and critical services
+    "system", "system idle process", "secure system", "registry", "memcompression",
+    "smss.exe", "csrss.exe", "wininit.exe", "winlogon.exe",
+    "services.exe", "lsass.exe", "lsm.exe", "svchost.exe",
+    "fontdrvhost.exe", "spoolsv.exe", "sihost.exe", "taskhostw.exe",
+    # Unix init/supervisors
+    "init", "systemd", "systemd-resolved", "launchd", "kernel_task",
+}
+
+# Windows reserves low PIDs for kernel/system processes (e.g. "System" is PID 4);
+# on Unix even PID 1 can be an ordinary process, so names carry that role there.
+SYSTEM_PID_THRESHOLD = 5
+
+
+def _low_pid_is_system(pid: int) -> bool:
+    """The low-PID heuristic is Windows-specific; elsewhere rely on the name list."""
+    return sys.platform == "win32" and pid < SYSTEM_PID_THRESHOLD
+
 
 def validate_port(text: str) -> bool | str:
     if not text.isascii() or not text.isdigit():
@@ -36,10 +56,19 @@ def validate_port(text: str) -> bool | str:
 
 
 def prompt_custom_port() -> int | None:
+    custom_bindings = KeyBindings()
+
+    @custom_bindings.add("escape", eager=True)
+    def cancel_custom_port(event):
+        # Esc is a meta-command prefix, so eager=True skips the timeoutlen wait;
+        # aborting with KeyboardInterrupt makes it behave exactly like Ctrl+C.
+        event.app.exit(exception=KeyboardInterrupt, style="class:aborting")
+
     value = questionary.text(
         "Enter a port to kill",
         validate=validate_port,
         style=STYLE,
+        key_bindings=custom_bindings,
     ).ask(kbi_msg="")
     return int(value) if value is not None else None
 
@@ -68,9 +97,14 @@ def collect_listening_ports(collect_paths: bool = False) -> list[PortRow]:
 def kill_row(row: PortRow) -> str:
     terminated = []
     denied = 0
+    refused = 0
     for pid in row.pids:
         try:
             proc = psutil.Process(pid)
+            # the scan-time identity is stale (PID recycling); revalidate the live process
+            if is_protected_process(proc):
+                refused += 1
+                continue
             proc.terminate()
             terminated.append(proc)
         except psutil.NoSuchProcess:
@@ -90,19 +124,51 @@ def kill_row(row: PortRow) -> str:
         suffix = f"; {denied} process(es) need elevated permissions" if denied else ""
         if alive:
             suffix += f"; {len(alive)} process(es) still running"
+        if refused:
+            suffix += f"; {refused} system-level process(es) not killed"
         return f"Killed PID {', '.join(map(str, killed))} ({names}) on port {row.port}{suffix}"
+    if refused:
+        suffix = f"; {denied} process(es) need elevated permissions" if denied else ""
+        return f"Port {row.port}: refused to kill {refused} system-level process(es){suffix}"
     if denied:
         return f"Port {row.port}: permission denied, {denied} process(es) not killed"
     return f"Port {row.port}: process already gone"
 
 
+def is_system_process(row: PortRow) -> bool:
+    """True when the row is held by a kernel/system-level process."""
+    if any(_low_pid_is_system(pid) for pid in row.pids):
+        return True
+    return any(name.lower() in SYSTEM_PROCESS_NAMES for name in row.names)
+
+
+def is_protected_process(proc: psutil.Process) -> bool:
+    """True when `proc`'s live identity is system-level; fail closed when unverifiable."""
+    if _low_pid_is_system(proc.pid):
+        return True
+    try:
+        return proc.name().lower() in SYSTEM_PROCESS_NAMES
+    except (psutil.NoSuchProcess, psutil.AccessDenied):
+        return True
+
+
+def system_warning(row: PortRow) -> str:
+    names = ", ".join(sorted(row.names)) or "an unknown system process"
+    return (
+        f"⚠️  Port {row.port} is held by a system-level process ({names}). "
+        "Killing it may crash or destabilize the operating system."
+    )
+
+
 def format_row(row: PortRow, show_paths: bool = False) -> str:
     pids = ", ".join(map(str, sorted(row.pids))) or "-"
     names = ", ".join(sorted(row.names)) or "?"
+    marker = " ⚠" if is_system_process(row) else ""
     if not show_paths:
-        return f"{row.port:<6} {pids:<8} {names}"
+        return f"{row.port:<6} {pids:<8} {names}{marker}"
     paths = ", ".join(sorted(row.paths)) or "?"
-    return f"{row.port:<6} {pids:<8} {names:<24} {paths}"
+    name_cell = f"{names}{marker}"
+    return f"{row.port:<6} {pids:<8} {name_cell:<24} {paths}"
 
 
 def select_row(
@@ -191,11 +257,21 @@ def confirm_kill(row: PortRow) -> bool | None:
     ).ask(kbi_msg="")
 
 
+def confirm_exit_to_interactive() -> None:
+    """System-level rows are unkillable from the TUI: the only way out is back to the list."""
+    questionary.select(
+        "Exit to interactive list?",
+        choices=[questionary.Choice(title="Return to the interactive list", value=None)],
+        instruction=" ",
+        style=STYLE,
+    ).ask(kbi_msg="")
+
+
 def resolve_port(rows: list[PortRow], port: int) -> PortRow | None:
     """Look up `port` in `rows`; print a warning and return None if it can't be killed."""
     row = next((r for r in rows if r.port == port), None)
     if row is None:
-        click.echo(click.style(f"Port {port}: no process is listening on it", fg="yellow"))
+        click.echo(click.style(f"Port {port}: no TCP process is listening on it", fg="yellow"))
         return None
     if not row.pids:
         click.echo(click.style(f"Port {port}: listening, but no process could be identified", fg="yellow"))
@@ -220,19 +296,36 @@ def interactive_tui(subtitle: str) -> None:
             print_banner(subtitle)
             port = prompt_custom_port()
             if port is None:
-                print_cancelled()
-                return
+                # Esc/Ctrl+C in the custom-port prompt returns to the interactive list
+                click.clear()
+                print_banner(subtitle)
+                continue
             row = resolve_port(rows, port)
             if row is None:
+                # resolve_port already printed the reason; keep it visible above the next list
                 continue
         else:
             row = picked
+        # fresh screen for the kill stage: banner, warning (if any), then the confirm prompt
+        click.clear()
+        print_banner(subtitle)
+        if is_system_process(row):
+            click.echo(click.style(system_warning(row), fg="yellow"))
+            confirm_exit_to_interactive()
+            # the exit prompt shouldn't linger above the next list
+            click.clear()
+            print_banner(subtitle)
+            continue
         confirmed = confirm_kill(row)
         if confirmed is None:
             print_cancelled()
             return
-        if confirmed:
-            click.echo(click.style(kill_row(row), fg="green"))
+        msg = kill_row(row) if confirmed else None
+        # refresh the screen so the confirm/warning lines don't linger above the next list
+        click.clear()
+        print_banner(subtitle)
+        if msg:
+            click.echo(click.style(msg, fg="green"))
 
 
 def list_plain(show_paths: bool = False) -> None:
@@ -261,6 +354,10 @@ def kill_port_flow(port: int, assume_yes: bool) -> None:
     print_banner(f"Kill process on port {port}")
     row = resolve_port(collect_listening_ports(), port)
     if row is None:
+        return
+    if is_system_process(row):
+        click.echo(click.style(system_warning(row), fg="yellow"))
+        click.echo(click.style(f"Port {port}: refusing to kill a system-level process", fg="yellow"))
         return
     if not assume_yes:
         if not (sys.stdin.isatty() and sys.stdout.isatty()):
@@ -294,7 +391,7 @@ def _list_callback(ctx, param, value):
 @click.option(
     "--kill", "-k",
     type=click.IntRange(1, 65535),
-    help="Kill the process listening on PORT.",
+    help="Kill the TCP process listening on PORT.",
 )
 @click.option("-y", "--yes", is_flag=True, help="Skip the confirmation prompt.")
 @click.pass_context
