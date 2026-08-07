@@ -8,6 +8,7 @@ from pkport.main import (
     PortRow,
     collect_listening_ports,
     format_row,
+    is_system_process,
     kill_row,
     list_plain,
     main,
@@ -49,6 +50,18 @@ class _FakeProcess:
     def terminate(self):
         if self._terminate_raises is not None:
             raise self._terminate_raises
+
+
+class _TrackingProcess(_FakeProcess):
+    """Records terminate() calls; used to assert the protection check fires first."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.terminated = 0
+
+    def terminate(self):
+        self.terminated += 1
+        super().terminate()
 
 
 def _check(condition, message):
@@ -174,6 +187,21 @@ def test_format_row_shows_paths_when_enabled():
     _check(head.endswith("  "), f"expected a gap before the path, got: {label!r}")
 
 
+def test_is_system_process_low_pid_is_system_on_windows(monkeypatch):
+    monkeypatch.setattr(sys, "platform", "win32")
+    row = PortRow(port=8080, pids={4}, names={"myapp"})
+
+    _check(is_system_process(row), "expected PID 4 to be system-level on Windows")
+
+
+def test_is_system_process_low_pid_not_system_on_non_windows(monkeypatch):
+    # low PIDs (even 1) are not system-owned outside Windows, e.g. a container's PID 1
+    monkeypatch.setattr(sys, "platform", "linux")
+    row = PortRow(port=8080, pids={1}, names={"myapp"})
+
+    _check(not is_system_process(row), "expected PID 1 to be safe on non-Windows")
+
+
 def test_validate_port():
     _check(validate_port("8080") is True, "expected a valid port to pass")
     _check(validate_port("1") is True, "expected port 1 to pass")
@@ -276,6 +304,31 @@ def test_kill_row_no_such_process(monkeypatch):
     msg = kill_row(row)
 
     _check("already gone" in msg, f"expected 'already gone' in message, got: {msg!r}")
+
+
+def test_kill_row_refuses_recycled_system_pid(monkeypatch):
+    # the scan said "node", but the PID was recycled by a protected process
+    # before termination -> kill_row must revalidate and refuse
+    row = PortRow(port=8080, pids={123}, names={"node"})
+    proc = _TrackingProcess(123, name="svchost.exe")
+    monkeypatch.setattr("pkport.main.psutil.Process", lambda pid: proc)
+
+    msg = kill_row(row)
+
+    _check("refused" in msg, f"expected a refusal, got: {msg!r}")
+    _check(proc.terminated == 0, f"expected no terminate call, got: {proc.terminated} calls")
+
+
+def test_kill_row_fails_closed_on_unknown_identity(monkeypatch):
+    # live identity cannot be verified (AccessDenied on name) -> fail closed
+    row = PortRow(port=8080, pids={123}, names={"node"})
+    proc = _TrackingProcess(123, name=psutil.AccessDenied(pid=123))
+    monkeypatch.setattr("pkport.main.psutil.Process", lambda pid: proc)
+
+    msg = kill_row(row)
+
+    _check("refused" in msg, f"expected a refusal, got: {msg!r}")
+    _check(proc.terminated == 0, f"expected no terminate call, got: {proc.terminated} calls")
 
 
 def test_cli_bare_non_tty(monkeypatch):

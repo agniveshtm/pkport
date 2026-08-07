@@ -36,8 +36,14 @@ SYSTEM_PROCESS_NAMES = {
     "init", "systemd", "systemd-resolved", "launchd", "kernel_task",
 }
 
-# PIDs below this are kernel/system-owned (e.g. "System" is PID 4 on Windows).
+# Windows reserves low PIDs for kernel/system processes (e.g. "System" is PID 4);
+# on Unix even PID 1 can be an ordinary process, so names carry that role there.
 SYSTEM_PID_THRESHOLD = 5
+
+
+def _low_pid_is_system(pid: int) -> bool:
+    """The low-PID heuristic is Windows-specific; elsewhere rely on the name list."""
+    return sys.platform == "win32" and pid < SYSTEM_PID_THRESHOLD
 
 
 def validate_port(text: str) -> bool | str:
@@ -91,9 +97,14 @@ def collect_listening_ports(collect_paths: bool = False) -> list[PortRow]:
 def kill_row(row: PortRow) -> str:
     terminated = []
     denied = 0
+    refused = 0
     for pid in row.pids:
         try:
             proc = psutil.Process(pid)
+            # the scan-time identity is stale (PID recycling); revalidate the live process
+            if is_protected_process(proc):
+                refused += 1
+                continue
             proc.terminate()
             terminated.append(proc)
         except psutil.NoSuchProcess:
@@ -113,7 +124,12 @@ def kill_row(row: PortRow) -> str:
         suffix = f"; {denied} process(es) need elevated permissions" if denied else ""
         if alive:
             suffix += f"; {len(alive)} process(es) still running"
+        if refused:
+            suffix += f"; {refused} system-level process(es) not killed"
         return f"Killed PID {', '.join(map(str, killed))} ({names}) on port {row.port}{suffix}"
+    if refused:
+        suffix = f"; {denied} process(es) need elevated permissions" if denied else ""
+        return f"Port {row.port}: refused to kill {refused} system-level process(es){suffix}"
     if denied:
         return f"Port {row.port}: permission denied, {denied} process(es) not killed"
     return f"Port {row.port}: process already gone"
@@ -121,9 +137,19 @@ def kill_row(row: PortRow) -> str:
 
 def is_system_process(row: PortRow) -> bool:
     """True when the row is held by a kernel/system-level process."""
-    if any(pid < SYSTEM_PID_THRESHOLD for pid in row.pids):
+    if any(_low_pid_is_system(pid) for pid in row.pids):
         return True
     return any(name.lower() in SYSTEM_PROCESS_NAMES for name in row.names)
+
+
+def is_protected_process(proc: psutil.Process) -> bool:
+    """True when `proc`'s live identity is system-level; fail closed when unverifiable."""
+    if _low_pid_is_system(proc.pid):
+        return True
+    try:
+        return proc.name().lower() in SYSTEM_PROCESS_NAMES
+    except (psutil.NoSuchProcess, psutil.AccessDenied):
+        return True
 
 
 def system_warning(row: PortRow) -> str:
