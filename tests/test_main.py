@@ -212,7 +212,7 @@ def test_resolve_port_not_listening(monkeypatch):
     row = resolve_port(rows, 9999)
 
     _check(row is None, f"expected None, got: {row!r}")
-    _check(any("no process is listening" in m for m in messages), f"expected a warning, got: {messages!r}")
+    _check(any("no TCP process is listening" in m for m in messages), f"expected a warning, got: {messages!r}")
 
 
 def test_resolve_port_no_pid(monkeypatch):
@@ -309,9 +309,23 @@ def test_cli_kill_nonexistent_port(monkeypatch):
 
     _check(result.exit_code == 0, f"expected exit code 0, got: {result.exit_code}")
     _check(
-        "no process is listening" in result.output,
-        f"expected 'no process is listening' in output, got: {result.output!r}",
+        "no TCP process is listening" in result.output,
+        f"expected 'no TCP process is listening' in output, got: {result.output!r}",
     )
+
+
+def test_cli_kill_system_port_refuses(monkeypatch):
+    rows = [PortRow(port=135, pids={1684}, names={"svchost.exe"})]
+    monkeypatch.setattr("pkport.main.collect_listening_ports", lambda: rows)
+
+    result = CliRunner().invoke(main, ["--kill", "135", "-y"])
+
+    _check(result.exit_code == 0, f"expected exit code 0, got: {result.exit_code}")
+    _check(
+        "system-level process" in result.output,
+        f"expected a refusal in output, got: {result.output!r}",
+    )
+    _check("Killed" not in result.output, f"expected no kill, got: {result.output!r}")
 
 
 def test_select_row_toggle_paths_refresh_by_port():
